@@ -7,6 +7,11 @@ import pandas as pd
 import plotly.express as px
 from dotenv import load_dotenv
 import plotly.graph_objects as go
+from datetime import datetime, timedelta
+from statsmodels.tsa.arima.model import ARIMA
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -109,10 +114,85 @@ def get_historical_aqi(city):
         st.error("Failed to fetch historical AQI data.")
         return None, pd.DataFrame()  # Return None for current AQI and empty DataFrame
 
+# New function to fetch weather data
+def get_weather_data(city):
+    api_key = OPENWEATHERMAP_API_KEY
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric"
+    response = requests.get(url).json()
+    
+    if response.get('cod') == 200:
+        weather_data = {
+            'temperature': response['main']['temp'],
+            'humidity': response['main']['humidity'],
+            'description': response['weather'][0]['description'],
+            'icon': response['weather'][0]['icon']
+        }
+        return weather_data
+    else:
+        st.error("Failed to fetch weather data.")
+        return None
+
+# Function to forecast AQI using ARIMA
+def forecast_aqi(historical_data):
+    if historical_data.empty:
+        return pd.DataFrame()
+    
+    model = ARIMA(historical_data['aqi'], order=(1,1,1))
+    results = model.fit()
+    
+    forecast = results.forecast(steps=7)
+    forecast_df = pd.DataFrame({'timestamp': pd.date_range(start=historical_data['timestamp'].iloc[-1] + timedelta(days=1), periods=7),
+                                'aqi': forecast})
+    return forecast_df
+
+def create_aqi_gauge(aqi_value):
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=aqi_value,
+        domain={'x': [0, 1], 'y': [0, 1]},
+        title={'text': "Air Quality Index"},
+        gauge={
+            'axis': {'range': [None, 500]},
+            'bar': {'color': "darkblue"},
+            'steps': [
+                {'range': [0, 50], 'color': "green"},
+                {'range': [51, 100], 'color': "yellow"},
+                {'range': [101, 150], 'color': "orange"},
+                {'range': [151, 200], 'color': "red"},
+                {'range': [201, 300], 'color': "purple"},
+                {'range': [301, 500], 'color': "maroon"}
+            ],
+            'threshold': {
+                'line': {'color': "red", 'width': 4},
+                'thickness': 0.75,
+                'value': aqi_value
+            }
+        }
+    ))
+    fig.update_layout(height=300)
+    return fig
+
+def create_pollution_radar(components):
+    categories = list(components.keys())
+    values = list(components.values())
+    
+    fig = go.Figure(go.Scatterpolar(
+        r=values,
+        theta=categories,
+        fill='toself'
+    ))
+    fig.update_layout(
+        polar=dict(radialaxis=dict(visible=True)),
+        showlegend=False,
+        height=300,
+        title=""
+    )
+    return fig
+
 # Set page config
 st.set_page_config(layout="wide", page_title="Smart City Dashboard")
 
-# Custom CSS
+# Update the custom CSS
 st.markdown("""
     <style>
     .main {
@@ -146,12 +226,36 @@ st.markdown("""
     .sidebar .stRadio > label:hover {
         background-color: #e0e0e0;
     }
+    .footer {
+        margin-top: 2rem;
+        padding: 1.5rem 0;
+        background-color: #f8f9fa;
+        border-top: 1px solid #e0e0e0;
+        font-size: 0.9em;
+        color: #333;
+    }
+    .footer-content {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .footer-section {
+        margin: 0.5rem 1rem;
+    }
+    .footer-title {
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+    }
+    .footer-item {
+        margin-bottom: 0.25rem;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # Sidebar content
 st.sidebar.title("Smart City Dashboard")
-st.sidebar.markdown("Monitor real-time traffic and pollution data for major Indian cities.")
+st.sidebar.markdown("Monitor real-time traffic, pollution, and weather data for major Indian cities.")
 
 # City selection
 indian_cities = ["Delhi", "Mumbai", "Bangalore", "Kolkata", "Chennai", "Hyderabad", "Ahmedabad", "Pune", "Jaipur", "Lucknow"]
@@ -160,6 +264,7 @@ city = st.sidebar.selectbox("Select a City", indian_cities)
 # Fetch data for the selected city
 current_aqi, historical_aqi_df = get_historical_aqi(city)
 components, lat, lon = get_pollution_data(city)
+weather_data = get_weather_data(city)
 
 # Display key statistics in the sidebar
 st.sidebar.markdown("### Key Statistics")
@@ -200,15 +305,38 @@ selected_level = st.sidebar.radio("AQI Information", list(aqi_levels.keys()))
 st.sidebar.info(aqi_levels[selected_level])
 
 # Main content
-st.title("Smart City Traffic and Pollution Monitoring")
+st.title("Smart City Traffic, Pollution, and Weather Monitoring")
 
 if lat is not None and lon is not None:
-    # Create two columns for layout
-    col1, col2 = st.columns(2)
+    # Create two columns for the main content
+    col1, col2 = st.columns([3, 2])
 
     with col1:
+        # Display Map
+        st.markdown("### City Map")
+        m = folium.Map(location=[lat, lon], zoom_start=12)
+        folium.Marker(
+            location=[lat, lon],
+            popup=f"AQI: {current_aqi}",
+            icon=folium.Icon(color='red' if current_aqi > 100 else 'green')
+        ).add_to(m)
+        st.components.v1.html(folium.Figure().add_child(m).render(), height=400)
+
+        # Add AQI Gauge
+        st.markdown("### Air Quality Index (AQI) Gauge")
+        aqi_gauge = create_aqi_gauge(current_aqi)
+        st.plotly_chart(aqi_gauge, use_container_width=True)
+        
+        # Add Pollution Radar Chart
+        if components:
+            st.markdown("### Pollutants Concentration Radar")
+            pollution_radar = create_pollution_radar(components)
+            st.plotly_chart(pollution_radar, use_container_width=True)
+            
+
+    with col2:
         # Display Current AQI
-        st.markdown(f"### Air Quality Index (AQI)")
+        st.markdown("### Air Quality Index (AQI)")
         aqi_color = 'red' if current_aqi > 100 else 'green'
         st.markdown(f"""
             <div class="stCard">
@@ -238,16 +366,26 @@ if lat is not None and lon is not None:
         else:
             st.write("Traffic data not available.")
 
-    with col2:
-        # Display Map
-        st.markdown("### City Map")
-        m = folium.Map(location=[lat, lon], zoom_start=12)
-        folium.Marker(
-            location=[lat, lon],
-            popup=f"AQI: {current_aqi}",
-            icon=folium.Icon(color='red' if current_aqi > 100 else 'green')
-        ).add_to(m)
-        folium_static(m)
+        # Display Weather Information
+        st.markdown("### Weather Information")
+        if weather_data:
+            st.markdown(f"""
+                <div class="stCard">
+                    <span class="metric-label">Temperature</span><br>
+                    <span class="metric-value">{weather_data['temperature']}°C</span>
+                </div>
+                <div class="stCard">
+                    <span class="metric-label">Humidity</span><br>
+                    <span class="metric-value">{weather_data['humidity']}%</span>
+                </div>
+                <div class="stCard">
+                    <span class="metric-label">Weather</span><br>
+                    <span class="metric-value">{weather_data['description'].capitalize()}</span>
+                    <img src="http://openweathermap.org/img/w/{weather_data['icon']}.png" alt="Weather icon">
+                </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.write("Weather data not available.")
 
     # Display Pollution Information
     st.markdown("### Pollutants Concentration")
@@ -261,19 +399,67 @@ if lat is not None and lon is not None:
         fig.update_layout(xaxis_tickangle=-45)
         st.plotly_chart(fig, use_container_width=True)
 
-    # Display Historical AQI Trend
-    st.markdown("### Historical AQI Trend")
+    # Display Historical AQI Trend and Forecast
+    st.markdown("### Historical AQI Trend and Forecast")
     if historical_aqi_df is not None and not historical_aqi_df.empty:
         historical_aqi_df['timestamp'] = pd.to_datetime(historical_aqi_df['timestamp'])
-        fig = px.line(
-            historical_aqi_df,
-            x='timestamp',
-            y='aqi',
-            title=f"Historical PM2.5 AQI Trend for {city}",
-            labels={'timestamp': 'Date', 'aqi': 'AQI (PM2.5)'}
+        
+        # Generate AQI forecast
+        forecast_df = forecast_aqi(historical_aqi_df)
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=historical_aqi_df['timestamp'],
+            y=historical_aqi_df['aqi'],
+            mode='lines+markers',
+            name='Historical AQI'
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=forecast_df['timestamp'],
+            y=forecast_df['aqi'],
+            mode='lines+markers',
+            name='AQI Forecast',
+            line=dict(dash='dash')
+        ))
+        
+        fig.update_layout(
+            title=f"Historical and Forecasted PM2.5 AQI Trend for {city}",
+            xaxis_title="Date",
+            yaxis_title="AQI (PM2.5)",
+            legend_title="Data Type",
+            hovermode="x unified"
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.write("Historical AQI data not available.")
+
 else:
     st.error("Unable to fetch data for the selected city. Please try again later.")
+
+# Footer with data sources and last update time
+st.markdown("""
+    <div class="footer">
+        <div class="footer-content">
+            <div class="footer-section">
+                <div class="footer-title">Data Sources</div>
+                <div class="footer-item">OpenWeatherMap API</div>
+                <div class="footer-item">World Air Quality Index Project</div>
+                <div class="footer-item">OpenRouteService API</div>
+            </div>
+            <div class="footer-section">
+                <div class="footer-title">Last Updated</div>
+                <div class="footer-item">{}</div>
+            </div>
+            <div class="footer-section">
+                <div class="footer-title">About</div>
+                <div class="footer-item">Smart City Dashboard v1.0</div>
+                <div class="footer-item">© 2024 Suraj Biswas</div>
+            </div>
+        </div>
+    </div>
+""".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")), unsafe_allow_html=True)
+
+# Run the Streamlit app
+if __name__ == "__main__":
+    st.write("")
