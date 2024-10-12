@@ -14,6 +14,7 @@ This project is a Smart City Traffic, Pollution, and Weather Monitoring Dashboar
 # Installation
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/Suraj-Biswas23/Smart-City-Traffic-and-Pollution-Monitoring.git
    ```
@@ -45,5 +46,16 @@ You can obtain the API keys from:
   ```
 Open your browser at http://localhost:8501 to view the dashboard.
 
+## Project Overview
 
+The Smart City Dashboard provides a comprehensive real-time monitoring system that helps users stay updated on air quality, traffic conditions, and weather in their selected city. By combining data from various sources and presenting them in an interactive way, it offers valuable insights for better city management and environmental awareness.
 
+## Tech Stack
+
+- Python: The core language for developing the backend logic.
+- Streamlit: Used for creating the interactive dashboard.
+- Plotly: For generating graphs and charts (AQI trends, radar charts).
+- Folium: For generating the map interface.
+- OpenWeatherMap API: For retrieving weather and air pollution data.
+- OpenRouteService API: For real-time traffic information.
+- WAQI API: For historical and forecasted AQI data.
