@@ -10,7 +10,6 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from statsmodels.tsa.arima.model import ARIMA
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 
 # Load environment variables from .env file
